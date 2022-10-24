@@ -6,8 +6,39 @@ import subprocess
 from typing import *
 
 assembler: str = sys.argv[1]
-input_filename: str = sys.argv[2]
-flags: List[str] = sys.argv[3:]
+input_filename_index: int = -1
+
+# Find the input file in the argument list
+arg_index: int = 2
+args_to_remove: List[int] = []
+# Use a while loop so that indices can be skipped
+while arg_index < len(sys.argv):
+    cur_arg: str = sys.argv[arg_index]
+    if cur_arg[0] != "-":
+        if input_filename_index == -1:
+            input_filename_index = arg_index
+            args_to_remove.append(arg_index)
+        else:
+            print("Cannot process multiple asm files at once")
+            sys.exit(1)
+    elif len(cur_arg) == 2 and cur_arg[1] in ["o", "x"]:
+        arg_index += 1 # Skip the next argument
+    elif len(cur_arg) == 3 and cur_arg == "-Qy":
+        args_to_remove.append(arg_index) # Remove this from the args since it's not accepted by modern gas
+    arg_index += 1
+
+if input_filename_index == -1:
+    print("No input file in arguments")
+    sys.exit(1)
+
+input_filename: str = sys.argv[input_filename_index]
+
+# Remove the input file from the argument list, as mips gas will be assembling stdin
+for to_remove in reversed(args_to_remove):
+    del sys.argv[to_remove]
+
+flags: List[str] = sys.argv[2:]
+print(flags)
 
 branch_mnemonics: Set[str] = {
     "bc1f", "bc1fl", "bc1t", "bc1tl", # cop1
@@ -65,6 +96,8 @@ with open(input_filename, mode="r") as input_file:
     delay_slot: bool = False
     file_count: int = 0
     prev_instruction_index: int = 0
+    last_file_directive: int = -1
+    local_symbols: Set[str] = set()
 
     for line_index, line in enumerate(input_lines):
         tokens: List[str] = get_line_tokens(line)
@@ -92,12 +125,17 @@ with open(input_filename, mode="r") as input_file:
                 elif setting == "reorder":
                     is_reorder = True
                     continue # skip reorder directives
+            elif directive == "local":
+                local_symbols.add(tokens[1])
             elif directive == "comm":
                 # Record .comm symbols and sizes to emit to bss later
                 comm_symbol: str
                 comm_size: str
-                comm_symbol, comm_size = [s.strip() for s in tokens[1].split(",")]
-                comm_symbols.append((comm_symbol, comm_size))
+                comm_symbol, comm_size = [s.strip() for s in tokens[1].split(",")][:2]
+                if comm_symbol in local_symbols:
+                    lcomm_symbols.append((comm_symbol, comm_size))
+                else:
+                    comm_symbols.append((comm_symbol, comm_size))
                 line = ""
             elif directive == "lcomm":
                 # Record .lcomm symbols and sizes to emit to bss later
@@ -109,7 +147,8 @@ with open(input_filename, mode="r") as input_file:
             elif directive == "file":
                 # SN's cc1 has issues reusing file numbers in .file directives, so fix them up
                 file_count += 1
-                line = f"\t.file\t{file_count} {tokens[2]}\n"
+                line = f"\t.file\t{file_count + 1} {tokens[2]}\n"
+                last_file_directive = len(preprocessed)
             elif directive in ["def", "begin", "bend"]:
                 # Modern gas doesn't understand these directives, so get rid of them
                 line = ""
@@ -299,6 +338,12 @@ with open(input_filename, mode="r") as input_file:
             f"{symbol}:\n"
             f"\t.space {size}\n"
         )
+    
+    if last_file_directive != -1:
+        file_directive_tokens: List[str] = get_line_tokens(preprocessed[last_file_directive])
+        line_directive: str = f"\t.file\t1 {file_directive_tokens[2]}\n"
+        preprocessed[last_file_directive] = ""
+        preprocessed.insert(0, line_directive)
 
     assembler_input: str = "".join(preprocessed)
     # print(assembler_input)
