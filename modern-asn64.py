@@ -23,6 +23,8 @@ while arg_index < len(sys.argv):
             sys.exit(1)
     elif len(cur_arg) == 2 and cur_arg[1] in ["o", "x"]:
         arg_index += 1 # Skip the next argument
+    elif len(cur_arg) == 2 and cur_arg == "-V":
+        sys.argv[arg_index] = "-v" # Replace with modern gas equivalent
     elif len(cur_arg) == 3 and cur_arg == "-Qy":
         args_to_remove.append(arg_index) # Remove this from the args since it's not accepted by modern gas
     arg_index += 1
@@ -38,7 +40,6 @@ for to_remove in reversed(args_to_remove):
     del sys.argv[to_remove]
 
 flags: List[str] = sys.argv[2:]
-print(flags)
 
 branch_mnemonics: Set[str] = {
     "bc1f", "bc1fl", "bc1t", "bc1tl", # cop1
